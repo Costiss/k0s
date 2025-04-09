@@ -4,101 +4,83 @@ metadata:
   name: postgres
 ---
 apiVersion: v1
-kind: Secret
-metadata:
-  name: postgres-secret
-  namespace: postgres
-type: Opaque
-data:
-  postgres-password: ${POSTGRES_PASSWORD}
----
-apiVersion: v1
 kind: PersistentVolume
 metadata:
-  name: postgres-pv
+  name: pg-local-pv
+  namespace: postgres
 spec:
-  storageClassName: "" # Explicitly set to empty for manual provisioning
   capacity:
     storage: 10Gi
   accessModes:
     - ReadWriteOnce
-  persistentVolumeReclaimPolicy: Retain # Keep data even if PVC is deleted
   hostPath:
-    path: /mnt/postgres-data # Your custom path
-    type: DirectoryOrCreate
+    #sudo chown -R 26:26 /mnt/postgres-data
+    path: /mnt/postgres-data
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: local-storage
 ---
-apiVersion: v1
-kind: PersistentVolumeClaim
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
 metadata:
-  name: postgres-pvc
+  name: main-cluster
   namespace: postgres
 spec:
-  storageClassName: "" # Must match the PV
-  accessModes:
-    - ReadWriteOnce
-  resources:
-    requests:
-      storage: 10Gi
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: postgres
-  namespace: postgres
-spec:
-  selector:
-    matchLabels:
-      app: postgres
-  template:
-    metadata:
-      labels:
-        app: postgres
-    spec:
-      containers:
-        - name: postgres
-          image: postgres:17
-          env:
-            - name: POSTGRES_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: postgres-secret
-                  key: postgres-password
-          volumeMounts:
-            - name: postgres-storage
-              mountPath: /var/lib/postgresql/data
-      volumes:
-        - name: postgres-storage
-          persistentVolumeClaim:
-            claimName: postgres-pvc
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: postgres
-  namespace: postgres
-spec:
-  type: ClusterIP
-  selector:
-    app: postgres
-  ports:
-    - port: 5432
-      targetPort: 5432
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: postgres-allow-all-internal
-  namespace: postgres
-spec:
-  podSelector:
-    matchLabels:
-      app: postgres
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - namespaceSelector: {} # Allow all namespaces
-          podSelector: {} # Allow all pods within those namespaces
-      ports:
-        - protocol: TCP
-          port: 5432
+  # Number of PostgreSQL instances (one primary, the rest replicas)
+  instances: 3
+  imageName: ghcr.io/cloudnative-pg/postgresql:17.4
+
+  # Configure persistent storage for database data.
+  # Each instance will have its own PersistentVolumeClaim.
+  storage:
+    size: 10Gi
+    storageClass: local-storage
+    pvcTemplate:
+      volumeName: pg-local-pv
+      storageClassName: local-storage
+      accessModes:
+        - ReadWriteOnce
+      resources:
+        requests:
+          storage: 10Gi
+
+  # It's often recommended to separate WAL (write-ahead logging)
+  # to avoid filling up the data volume. Here we assign WAL storage.
+  # walStorage:
+  #   size: 10Gi
+  #   storageClass: local-storage
+
+  # PostgreSQL runtime configuration parameters can be defined under postgresql.
+  postgresql:
+    parameters:
+      shared_buffers: "256MB" # Adjust shared buffers based on available memory
+      work_mem: "64MB" # Session-level memory for queries
+      max_connections: "100" # Maximum number of concurrent connections
+      # Add any additional parameters needed for your workload
+
+  # Delay settings (in seconds) – these can help coordinate startups and shutdowns
+  startDelay: 30
+  stopDelay: 100
+
+  # Update strategy for the primary instance.
+  # "unsupervised" triggers automatic switchover on instance manager update.
+  primaryUpdateStrategy: unsupervised
+
+  # Optionally, you can include resource requests/limits for each instance.
+  # resources:
+  #   requests:
+  #     memory: "1Gi"
+  #     cpu: "1000m"
+  #   limits:
+  #     memory: "1Gi"
+  #     cpu: "1000m"
+
+  # (Optional) Backup configuration – if you wish to enable continuous backups.
+  # Uncomment and adjust the section below if you want to enable backups via barman or an S3 object store.
+  # backup:
+  #   schedule: "0 2 * * *"         # Schedule daily backups at 2 AM (cron syntax)
+  #   retention: "7d"               # Retain backups for 7 days
+  #   barmanObjectStore:
+  #     destinationPath: "s3://your-backup-bucket/backup/"
+  #     s3Credentials:
+  #       name: s3-creds          # Name of the secret containing AWS credentials
+  #       key: creds              # Key within the secret (adjust as needed)
