@@ -4,6 +4,18 @@ metadata:
   name: postgres
 ---
 apiVersion: v1
+kind: Secret
+type: kubernetes.io/basic-auth
+metadata:
+  name: postgres-secret
+  namespace: postgres
+  labels:
+    cnpg.io/reload: ""
+stringData:
+  username: "${POSTGRES_USER}"
+  password: "${POSTGRES_PASSWORD}"
+---
+apiVersion: v1
 kind: PersistentVolume
 metadata:
   name: pg-local-pv
@@ -28,6 +40,10 @@ spec:
   # Number of PostgreSQL instances (one primary, the rest replicas)
   instances: 3
   imageName: ghcr.io/cloudnative-pg/postgresql:17.4
+
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: postgres-secret
 
   # Configure persistent storage for database data.
   # Each instance will have its own PersistentVolumeClaim.
