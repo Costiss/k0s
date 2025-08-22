@@ -1,0 +1,15 @@
+[Unit]
+Description=Postgres Backup Script
+
+[Service]
+Type=oneshot
+User=user
+ExecStart=/path/to/run.sh
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
