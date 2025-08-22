@@ -138,7 +138,7 @@ check_pg_user() {
 # Run pg_dumpall
 run_backup() {
     local timestamp=$(date +'%Y%m%d_%H%M%S')
-    local backup_file="$BACKUP_DIR/postgres_backup_$timestamp.sql"
+    local backup_file="/tmp/postgres_backup_$timestamp.sql"
     
     
     # Set PGPASSWORD if provided
@@ -158,11 +158,12 @@ run_backup() {
 # GPG encrypt the backup with password (symmetric encryption)
 encrypt_backup() {
     local sql_file="$1"
-    local gpg_file="${sql_file}.gpg"
+    local sql_file_name=$(basename "$sql_file")
+    local gpg_file="$BACKUP_DIR/${sql_file_name}.gpg"
     
     
     # Use symmetric encryption with password
-    if echo "$GPG_PASSWORD" | gpg --batch --yes --passphrase-fd 0 --symmetric --cipher-algo AES256 --compress-algo 2 --output "$gpg_file" "$sql_file" > $HOME/stuff/k0s/postgres/backup/p.log; then
+    if echo "$GPG_PASSWORD" | gpg --batch --yes --passphrase-fd 0 --symmetric --cipher-algo AES256 --compress-algo 2 --output "$gpg_file" "$sql_file" > /dev/null 2>&1; then
         echo "$gpg_file"
     else
         error "Encryption failed"
@@ -175,7 +176,7 @@ cleanup_old_backups() {
     log "Cleaning up old backups (keeping last 5)"
     
     # Clean .sql files
-    local sql_files=($(ls -t "$BACKUP_DIR"/postgres_backup_*.sql 2>/dev/null | tail -n +6))
+    local sql_files=($(ls -t /tmp/postgres_backup_*.sql 2>/dev/null))
     for file in "${sql_files[@]}"; do
         log "Removing old backup: $file"
         rm -f "$file"
