@@ -1,0 +1,208 @@
+# -------------------------------
+# Namespace Definition
+# -------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: rwmarkable
+
+---
+# -------------------------------
+# Persistent Volumes
+# -------------------------------
+
+# Data Volume
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: rwmarkable-data-pv
+spec:
+  storageClassName: ""
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /mnt/rwmarkable-data
+    type: DirectoryOrCreate
+
+# Config Volume
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: rwmarkable-config-pv
+spec:
+  storageClassName: ""
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /mnt/rwmarkable-config
+    type: DirectoryOrCreate
+
+# Cache Volume
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: rwmarkable-cache-pv
+spec:
+  storageClassName: ""
+  capacity:
+    storage: 1Gi
+  accessModes:
+    - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  hostPath:
+    path: /mnt/rwmarkable-cache
+    type: DirectoryOrCreate
+
+---
+# -------------------------------
+# Persistent Volume Claims
+# -------------------------------
+
+# Data PVC
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rwmarkable-data-pvc
+  namespace: rwmarkable
+spec:
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+# Config PVC
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rwmarkable-config-pvc
+  namespace: rwmarkable
+spec:
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+# Cache PVC
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: rwmarkable-cache-pvc
+  namespace: rwmarkable
+spec:
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+
+---
+# -------------------------------
+# Application Deployment
+# -------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rwmarkable
+  namespace: rwmarkable
+spec:
+  selector:
+    matchLabels:
+      app: rwmarkable
+  template:
+    metadata:
+      labels:
+        app: rwmarkable
+    spec:
+      #sudo chown -R 1001:1001 /mnt/rwmarkable-*
+      securityContext:
+        runAsUser: 1001
+        runAsGroup: 65533
+        fsGroup: 65533
+      containers:
+        - name: rwmarkable
+          image: ghcr.io/fccview/rwmarkable:latest
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: HTTPS
+              value: "true"
+            - name: APP_URL
+              value: "https://${RWMARKABLE_HOST}"
+          ports:
+            - containerPort: 3000
+          volumeMounts:
+            - name: rwmarkable-data-storage
+              mountPath: /app/data
+            - name: rwmarkable-config-storage
+              mountPath: /app/config
+            - name: rwmarkable-cache-storage
+              mountPath: /app/.next/cache
+      volumes:
+        - name: rwmarkable-data-storage
+          persistentVolumeClaim:
+            claimName: rwmarkable-data-pvc
+        - name: rwmarkable-config-storage
+          persistentVolumeClaim:
+            claimName: rwmarkable-config-pvc
+        - name: rwmarkable-cache-storage
+          persistentVolumeClaim:
+            claimName: rwmarkable-cache-pvc
+
+---
+# -------------------------------
+# Service Definition
+# -------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: rwmarkable
+  namespace: rwmarkable
+spec:
+  type: ClusterIP
+  selector:
+    app: rwmarkable
+  ports:
+    - name: http
+      port: 80
+      targetPort: 3000
+
+---
+# -------------------------------
+# Ingress Definition
+# -------------------------------
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: rwmarkable-ingress
+  namespace: rwmarkable
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    kubernetes.io/ingress.class: nginx
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: ${RWMARKABLE_HOST}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: rwmarkable
+                port:
+                  number: 80
